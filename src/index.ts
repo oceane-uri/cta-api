@@ -4,6 +4,7 @@ import dotenv from 'dotenv';
 import statsRoutes from './routes/stats';
 import { pool } from './config/db';
 import inspectionsRoutes from './routes/inspections';
+import authRoutes from './routes/auth';
 
 
 dotenv.config();
@@ -13,6 +14,7 @@ const port = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
+app.use('/api/auth', authRoutes);
 app.use('/api/stats', statsRoutes);
 app.use('/api/inspections', inspectionsRoutes);
 app.get('/', (_req, res) => {
