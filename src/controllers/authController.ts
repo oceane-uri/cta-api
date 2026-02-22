@@ -3,7 +3,13 @@ import { pool } from '../config/db';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'secretdevtest';
+function getJwtSecret(): string {
+  const secret = process.env.JWT_SECRET;
+  if (process.env.NODE_ENV === 'production' && (!secret || secret.length < 16)) {
+    throw new Error('JWT_SECRET must be set and at least 16 characters in production');
+  }
+  return secret || 'secretdevtest';
+}
 
 export const registerUser = async (req: Request, res: Response): Promise<void> => {
     const { email, password, role } = req.body;
@@ -24,6 +30,11 @@ export const registerUser = async (req: Request, res: Response): Promise<void> =
         res.status(201).json({ message: 'Utilisateur créé avec succès' });
     } catch (error) {
         console.error('Erreur registerUser :', error);
+        const origin = req.headers.origin;
+        res.setHeader('Access-Control-Allow-Origin', origin || '*');
+        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+        if (origin) res.setHeader('Access-Control-Allow-Credentials', 'true');
         res.status(500).json({ message: 'Erreur serveur' });
     }
 };
@@ -51,8 +62,8 @@ export const loginUser = async (req: Request, res: Response): Promise<void> => {
         }
 
         const token = jwt.sign(
-            { userId: user.id, role: user.role },
-            JWT_SECRET,
+            { userId: user.id, email: user.email, role: user.role },
+            getJwtSecret(),
             { expiresIn: '1h' }
         );
 
@@ -66,6 +77,12 @@ export const loginUser = async (req: Request, res: Response): Promise<void> => {
         });
     } catch (error) {
         console.error('Erreur loginUser :', error);
+        // Toujours envoyer CORS sur les erreurs (au cas où la réponse 500 serait vue sans les en-têtes du middleware)
+        const origin = req.headers.origin;
+        res.setHeader('Access-Control-Allow-Origin', origin || '*');
+        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+        if (origin) res.setHeader('Access-Control-Allow-Credentials', 'true');
         res.status(500).json({ message: 'Erreur serveur' });
     }
 };

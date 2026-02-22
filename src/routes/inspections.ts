@@ -1,5 +1,5 @@
 // src/routes/inspections.ts
-import express from 'express';
+import express, { type RequestHandler } from 'express';
 import {
   getAllInspections,
   getMonthlyCTACount,
@@ -18,33 +18,30 @@ import {
 import {
   getStatsByDateRange
 } from '../controllers/getStatsByDateRangeController';
-import { searchVehicleByPlate } from '../controllers/searchController';
-// import * as search from '../controllers/searchController';
+import { updateVehicleType, batchUpdateVehicleTypes } from '../controllers/vehicleController';
+import { authMiddleware } from '../middlewares/authMiddleware';
 
 const router = express.Router();
 
-router.get('/', getAllInspections); // Toutes les inspections
-router.get('/stats/vehicle-type', getStatsByVehicleType); // Stats par type de véhicule
-router.get('/stats/site-type', getStatsBySiteType); // Stats par type de site (DG, annexes, etc.)
-router.get('/stats/delays', getDelayedStats); // Retards de CTA
-router.get('/stats/total-plates', getTotalPlates); // Total d’immatriculations
-router.get('/unique-plates', getUniquePlatesWithLastVisit); //Pour la liste des véhicules et leur dernier passage au CTA
-// router.get('/search/:plate', searchVehicleByPlate);//Rechercher par plaque d'immatriculation
-router.get('/vehicles/:plate', getVehicleByPlate); // Recherche par plaque
-router.get('/stats/retards/plaque-unique', getDelayStatsFromUniquePlates);//Retards unique de CTA
-router.get('/stats/periode', getStatsByDateRange);
-// router.get('/search/:plate', searchVehicleByPlate);
+router.get('/', getAllInspections as RequestHandler); // Toutes les inspections
+router.get('/stats/vehicle-type', getStatsByVehicleType as RequestHandler); // Stats par type de véhicule
+router.get('/stats/site-type', getStatsBySiteType as RequestHandler); // Stats par type de site (DG, annexes, etc.)
+router.get('/stats/delays', getDelayedStats as RequestHandler); // Retards de CTA
+router.get('/stats/total-plates', getTotalPlates as RequestHandler); // Total d’immatriculations
+router.get('/unique-plates', getUniquePlatesWithLastVisit as RequestHandler);
+router.get('/vehicles/:plate', getVehicleByPlate as RequestHandler);
+router.get('/stats/retards/plaque-unique', getDelayStatsFromUniquePlates as RequestHandler);
+router.get('/stats/periode', getStatsByDateRange as RequestHandler);
 
 
 
 
-router.get("/stats/monthly", getMonthlyCTACount);
-router.get("/stats/daily", getDailyCTACount);
-router.get("/stats/total-retards", getTotalDelayedVehicles);
-// router.get("/details/:plate", searchVehicleDetailsByPlate);
+router.get('/stats/monthly', getMonthlyCTACount as RequestHandler);
+router.get('/stats/daily', getDailyCTACount as RequestHandler);
+router.get('/stats/total-retards', getTotalDelayedVehicles as RequestHandler);
 
-
-
-
+// Routes protégées pour la mise à jour des types de véhicules
+router.patch('/vehicles/type', authMiddleware, updateVehicleType);
+router.patch('/vehicles/type/batch', authMiddleware, batchUpdateVehicleTypes);
 
 export default router;

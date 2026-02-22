@@ -7,15 +7,12 @@ const router = express.Router();
 router.post('/register', registerUser); // Seul le superadmin l'utilisera
 router.post('/login', loginUser);
 
-// Nouvelle route GET /me
 router.get('/me', authMiddleware, (req, res) => {
-  // @ts-ignore
-  const user = req.user;
-
+  const user = (req as express.Request & { user: { userId: number; email?: string; role: string } }).user;
   res.json({
     id: user.userId,
-    email: user.email, // optionnel : tu peux ne pas l’avoir dans ton JWT
-    role: user.role
+    email: user.email,
+    role: user.role,
   });
 });
 

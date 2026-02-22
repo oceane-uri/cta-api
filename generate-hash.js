@@ -1,10 +1,10 @@
-const bcrypt = require('bcrypt');
+// const bcrypt = require('bcrypt');
 
-const password = 'direCtion@3076';
+// const password = 'direCtion@3076';
 
-bcrypt.hash(password, 10).then(hash => {
-    console.log('Hash du mot de passe:', hash);
-});
+// bcrypt.hash(password, 10).then(hash => {
+//     console.log('Hash du mot de passe:', hash);
+// });
 
 // INSERT INTO users(id, name, email, password, role, created_at, updated_at)
 // VALUES(UUID(), 'Super Admin', 'superadmin@cnsr.bj', '$2b$10$Fw48g2NPG4itiYpyEXwAeO6KpwSrOQ8Vnml2pR0BFflS3qiiILg3m', 'superadmin', NOW(), NOW());otDePasseSuperSecret
@@ -23,3 +23,11 @@ bcrypt.hash(password, 10).then(hash => {
 
 //email = direction@cnsr.bj
 // Password= 'direCtion@3076';
+
+const bcrypt = require('bcrypt');
+
+const password = '55N@%WtW82N7Xp&TZ6kHBu%eLD2kVb$Sp5mMpVuqfTZK#qD^SWdcqiempmePS^8A';
+
+bcrypt.hash(password, 10).then(hash => {
+    console.log('Hash du mot de passe:', hash);
+});
