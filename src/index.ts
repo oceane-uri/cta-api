@@ -77,7 +77,12 @@ app.use((err: Error, req: express.Request, res: express.Response, _next: express
   }
 });
 
-app.listen(port, () => {
-  console.log(`🚀 Serveur lancé sur http://localhost:${port}`);
-  console.log(`   → Dans Plesk, l'URL de l'application doit être : http://127.0.0.1:${port}`);
-});
+// Sur Vercel, l'app est utilisée comme handler serverless (pas de listen)
+if (!process.env.VERCEL) {
+  app.listen(port, () => {
+    console.log(`🚀 Serveur lancé sur http://localhost:${port}`);
+    console.log(`   → Dans Plesk, l'URL de l'application doit être : http://127.0.0.1:${port}`);
+  });
+}
+
+export { app };

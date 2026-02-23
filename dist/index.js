@@ -3,6 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.app = void 0;
 const express_1 = __importDefault(require("express"));
 const dotenv_1 = __importDefault(require("dotenv"));
 const stats_1 = __importDefault(require("./routes/stats"));
@@ -11,6 +12,7 @@ const inspections_1 = __importDefault(require("./routes/inspections"));
 const auth_1 = __importDefault(require("./routes/auth"));
 dotenv_1.default.config();
 const app = (0, express_1.default)();
+exports.app = app;
 const port = process.env.PORT || 3000;
 // Répondre explicitement aux requêtes OPTIONS (preflight) avec CORS pour éviter 500 sans en-têtes
 app.use('*', (req, res, next) => {
@@ -74,7 +76,10 @@ app.use((err, req, res, _next) => {
         res.status(500).json({ message: 'Erreur serveur', error: process.env.NODE_ENV === 'development' ? err.message : undefined });
     }
 });
-app.listen(port, () => {
-    console.log(`🚀 Serveur lancé sur http://localhost:${port}`);
-    console.log(`   → Dans Plesk, l'URL de l'application doit être : http://127.0.0.1:${port}`);
-});
+// Sur Vercel, l'app est utilisée comme handler serverless (pas de listen)
+if (!process.env.VERCEL) {
+    app.listen(port, () => {
+        console.log(`🚀 Serveur lancé sur http://localhost:${port}`);
+        console.log(`   → Dans Plesk, l'URL de l'application doit être : http://127.0.0.1:${port}`);
+    });
+}
