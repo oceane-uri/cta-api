@@ -1,0 +1,20 @@
+# Déploiement : ne pas inclure ce fichier (contient des infos sensibles)
+generate-hash.js
+
+# Dependencies
+node_modules/
+
+# Build
+dist/
+
+# Environnement
+.env
+.env.local
+.env.*.local
+
+# Logs et OS
+*.log
+.DS_Store
+
+# Dossier de déploiement généré
+deploy-output/

@@ -1,26 +1,64 @@
 import { Request, Response } from 'express';
-import {pool} from '../config/db';
+import { pool } from '../config/db';
+import { cache, getCacheKey } from '../utils/cache';
 
-
-type VehicleMeta = {
+type VehicleFullData = {
   immatriculation: string;
   typevehicule: string;
   derniere_visite: string;
   datevalidite: string;
-};
-
-type AgencyRow = {
-  agences: string;
-};
-
-type VehicleFullData = VehicleMeta & {
   agences: string | null;
 };
 
+/** Format de réponse attendu par CTA Stat (DelayStatistics) : { "3 mois": n, "6 mois": n, ... } */
+type DelayStatsResponse = Record<string, number>;
+
+/**
+ * Statistiques de retards pour plaques uniques - optimisées avec calcul SQL + cache
+ */
 export const getDelayStatsFromUniquePlates = async (_req: Request, res: Response) => {
   try {
+    const cacheKey = getCacheKey('stats:retards-plaque-unique', {});
+    const cached = cache.get<DelayStatsResponse>(cacheKey);
+    if (cached) return res.json(cached);
+
     const [rows] = await pool.query(`
-      SELECT v.immatriculation, v.datevalidite
+      SELECT 
+        SUM(CASE 
+          WHEN v.datevalidite IS NOT NULL 
+            AND v.datevalidite < DATE_SUB(CURRENT_DATE(), INTERVAL 24 MONTH) 
+          THEN 1 ELSE 0 
+        END) AS '24+ mois',
+        SUM(CASE 
+          WHEN v.datevalidite IS NOT NULL 
+            AND v.datevalidite >= DATE_SUB(CURRENT_DATE(), INTERVAL 24 MONTH)
+            AND v.datevalidite < DATE_SUB(CURRENT_DATE(), INTERVAL 18 MONTH) 
+          THEN 1 ELSE 0 
+        END) AS '18 mois',
+        SUM(CASE 
+          WHEN v.datevalidite IS NOT NULL 
+            AND v.datevalidite >= DATE_SUB(CURRENT_DATE(), INTERVAL 18 MONTH)
+            AND v.datevalidite < DATE_SUB(CURRENT_DATE(), INTERVAL 12 MONTH) 
+          THEN 1 ELSE 0 
+        END) AS '12 mois',
+        SUM(CASE 
+          WHEN v.datevalidite IS NOT NULL 
+            AND v.datevalidite >= DATE_SUB(CURRENT_DATE(), INTERVAL 12 MONTH)
+            AND v.datevalidite < DATE_SUB(CURRENT_DATE(), INTERVAL 9 MONTH) 
+          THEN 1 ELSE 0 
+        END) AS '9 mois',
+        SUM(CASE 
+          WHEN v.datevalidite IS NOT NULL 
+            AND v.datevalidite >= DATE_SUB(CURRENT_DATE(), INTERVAL 9 MONTH)
+            AND v.datevalidite < DATE_SUB(CURRENT_DATE(), INTERVAL 6 MONTH) 
+          THEN 1 ELSE 0 
+        END) AS '6 mois',
+        SUM(CASE 
+          WHEN v.datevalidite IS NOT NULL 
+            AND v.datevalidite >= DATE_SUB(CURRENT_DATE(), INTERVAL 6 MONTH)
+            AND v.datevalidite < DATE_SUB(CURRENT_DATE(), INTERVAL 3 MONTH) 
+          THEN 1 ELSE 0 
+        END) AS '3 mois'
       FROM vehicules v
       INNER JOIN (
         SELECT immatriculation, MAX(datevisite) AS max_date
@@ -28,39 +66,24 @@ export const getDelayStatsFromUniquePlates = async (_req: Request, res: Response
         GROUP BY immatriculation
       ) last_visits
       ON v.immatriculation = last_visits.immatriculation
-      AND v.datevisite = last_visits.max_date
+        AND v.datevisite = last_visits.max_date
+      WHERE v.datevalidite IS NOT NULL 
+        AND v.datevalidite < CURRENT_DATE()
     `);
 
-    const now = new Date();
-    const delays = {
-      '3 mois': 0,
-      '6 mois': 0,
-      '9 mois': 0,
-      '12 mois': 0,
-      '18 mois': 0,
-      '24+ mois': 0,
+    const result = (rows as any[])[0];
+    const response: DelayStatsResponse = {
+      '3 mois': Number(result['3 mois']) || 0,
+      '6 mois': Number(result['6 mois']) || 0,
+      '9 mois': Number(result['9 mois']) || 0,
+      '12 mois': Number(result['12 mois']) || 0,
+      '18 mois': Number(result['18 mois']) || 0,
+      '24+ mois': Number(result['24+ mois']) || 0,
     };
-
-    for (const row of rows as any[]) {
-      if (!row.datevalidite) continue;
-
-      const validUntil = new Date(row.datevalidite);
-      if (validUntil >= now) continue; // Pas en retard
-
-      const diffMonths =
-        (now.getFullYear() - validUntil.getFullYear()) * 12 +
-        (now.getMonth() - validUntil.getMonth());
-
-      if (diffMonths >= 24) delays['24+ mois']++;
-      else if (diffMonths >= 18) delays['18 mois']++;
-      else if (diffMonths >= 12) delays['12 mois']++;
-      else if (diffMonths >= 9) delays['9 mois']++;
-      else if (diffMonths >= 6) delays['6 mois']++;
-      else if (diffMonths >= 3) delays['3 mois']++;
-    }
-
-    res.json(delays);
+    cache.set(cacheKey, response, 90 * 1000); // 90s, CTA Stat refetch 60s
+    res.json(response);
   } catch (err) {
+    console.error('Erreur getDelayStatsFromUniquePlates:', err);
     res.status(500).json({ message: 'Erreur lors du calcul des retards', error: err });
   }
 };

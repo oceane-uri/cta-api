@@ -1,46 +1,113 @@
 // src/controllers/inspectionsController.ts
 import { Request, Response } from 'express';
 import {pool} from '../config/db';
+import { cache, getCacheKey } from '../utils/cache';
 
-
+/**
+ * Récupère toutes les inspections avec pagination
+ * Query params: page (défaut: 1), limit (défaut: 100, max: 1000)
+ */
 export const getAllInspections = async (req: Request, res: Response) => {
   try {
-    const [rows] = await pool.query('SELECT * FROM vehicules');
-    res.json(rows);
+    const page = Math.max(1, parseInt(req.query.page as string) || 1);
+    const limit = Math.min(1000, Math.max(1, parseInt(req.query.limit as string) || 100));
+    const offset = (page - 1) * limit;
+
+    // Requête optimisée avec pagination et seulement les colonnes nécessaires
+    const [rows] = await pool.query(
+      `SELECT immatriculation, typevehicule, datevisite, datevalidite, agences
+       FROM vehicules
+       ORDER BY datevisite DESC
+       LIMIT ? OFFSET ?`,
+      [limit, offset]
+    );
+
+    // Compter le total pour la pagination (avec cache possible)
+    const [countResult] = await pool.query(
+      'SELECT COUNT(*) as total FROM vehicules'
+    );
+    const total = (countResult as any[])[0].total;
+    const totalPages = Math.ceil(total / limit);
+
+    res.json({
+      data: rows,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages,
+        hasNext: page < totalPages,
+        hasPrev: page > 1,
+      },
+    });
   } catch (err) {
+    console.error('Erreur getAllInspections:', err);
     res.status(500).json({ message: 'Erreur lors du chargement des inspections', error: err });
   }
 };
 
 export const getMonthlyCTACount = async (req: Request, res: Response) => {
   try {
+    // Vérifier le cache (TTL de 1 minute pour les stats du mois en cours)
+    const cacheKey = getCacheKey('stats:monthly', {});
+    const cachedResult = cache.get(cacheKey);
+    if (cachedResult) {
+      return res.json(cachedResult);
+    }
+
+    // Utilisation d'un index sur datevisite si disponible pour de meilleures performances
     const [rows] = await pool.query(`
       SELECT COUNT(*) AS count
       FROM vehicules
-      WHERE MONTH(datevisite) = MONTH(CURRENT_DATE())
-        AND YEAR(datevisite) = YEAR(CURRENT_DATE())
+      WHERE datevisite >= DATE_FORMAT(CURRENT_DATE(), '%Y-%m-01')
+        AND datevisite < DATE_FORMAT(DATE_ADD(CURRENT_DATE(), INTERVAL 1 MONTH), '%Y-%m-01')
     `);
-    res.json((rows as any[])[0]);
+    
+    const result = (rows as any[])[0];
+    // Mettre en cache pendant 1 minute
+    cache.set(cacheKey, result, 60 * 1000);
+    
+    res.json(result);
   } catch (err) {
+    console.error('Erreur getMonthlyCTACount:', err);
     res.status(500).json({ message: 'Erreur CTA mensuels', error: err });
   }
 };
 
 export const getDailyCTACount = async (req: Request, res: Response) => {
   try {
+    // Cache de 30 secondes pour les stats du jour (peuvent changer fréquemment)
+    const cacheKey = getCacheKey('stats:daily', { date: new Date().toISOString().split('T')[0] });
+    const cachedResult = cache.get(cacheKey);
+    if (cachedResult) {
+      return res.json(cachedResult);
+    }
+
+    // Optimisation : utiliser une comparaison de plage au lieu de DATE() pour utiliser l'index
     const [rows] = await pool.query(`
       SELECT COUNT(*) AS count
       FROM vehicules
-      WHERE DATE(datevisite) = CURRENT_DATE()
+      WHERE datevisite >= CURDATE()
+        AND datevisite < DATE_ADD(CURDATE(), INTERVAL 1 DAY)
     `);
-    res.json((rows as any[])[0]);
+    
+    const result = (rows as any[])[0];
+    // Cache pendant 30 secondes
+    cache.set(cacheKey, result, 30 * 1000);
+    
+    res.json(result);
   } catch (err) {
+    console.error('Erreur getDailyCTACount:', err);
     res.status(500).json({ message: 'Erreur CTA journaliers', error: err });
   }
 };
 
 export const getTotalDelayedVehicles = async (_req: Request, res: Response) => {
   try {
+    const cacheKey = getCacheKey('stats:total-retards', {});
+    const cached = cache.get<{ count: number }>(cacheKey);
+    if (cached) return res.json(cached);
+
     const [rows] = await pool.query(`
       SELECT COUNT(*) AS count
       FROM (
@@ -56,7 +123,9 @@ export const getTotalDelayedVehicles = async (_req: Request, res: Response) => {
         WHERE v.datevalidite IS NOT NULL AND v.datevalidite < CURRENT_DATE()
       ) AS subquery
     `);
-    res.json((rows as any[])[0]);
+    const result = (rows as any[])[0];
+    cache.set(cacheKey, result, 45 * 1000); // 45s, aligné avec CTA Stat refetch
+    res.json(result);
   } catch (err) {
     res.status(500).json({ message: 'Erreur CTA en retard', error: err });
   }
@@ -92,49 +161,75 @@ export const getStatsBySiteType = async (req: Request, res: Response) => {
 };
 
 
+/**
+ * Statistiques de retards optimisées - calcul en SQL au lieu de JavaScript
+ * Beaucoup plus rapide pour de grandes quantités de données
+ */
 export const getDelayedStats = async (req: Request, res: Response) => {
   try {
+    // Calcul des retards directement en SQL pour de meilleures performances
     const [rows] = await pool.query(`
-      SELECT immatriculation, typevehicule, datevalidite
+      SELECT 
+        SUM(CASE 
+          WHEN datevalidite IS NOT NULL 
+            AND datevalidite < DATE_SUB(CURRENT_DATE(), INTERVAL 24 MONTH) 
+          THEN 1 ELSE 0 
+        END) AS '24+ mois',
+        SUM(CASE 
+          WHEN datevalidite IS NOT NULL 
+            AND datevalidite >= DATE_SUB(CURRENT_DATE(), INTERVAL 24 MONTH)
+            AND datevalidite < DATE_SUB(CURRENT_DATE(), INTERVAL 18 MONTH) 
+          THEN 1 ELSE 0 
+        END) AS '18 mois',
+        SUM(CASE 
+          WHEN datevalidite IS NOT NULL 
+            AND datevalidite >= DATE_SUB(CURRENT_DATE(), INTERVAL 18 MONTH)
+            AND datevalidite < DATE_SUB(CURRENT_DATE(), INTERVAL 12 MONTH) 
+          THEN 1 ELSE 0 
+        END) AS '12 mois',
+        SUM(CASE 
+          WHEN datevalidite IS NOT NULL 
+            AND datevalidite >= DATE_SUB(CURRENT_DATE(), INTERVAL 12 MONTH)
+            AND datevalidite < DATE_SUB(CURRENT_DATE(), INTERVAL 6 MONTH) 
+          THEN 1 ELSE 0 
+        END) AS '6 mois',
+        SUM(CASE 
+          WHEN datevalidite IS NOT NULL 
+            AND datevalidite >= DATE_SUB(CURRENT_DATE(), INTERVAL 6 MONTH)
+            AND datevalidite < DATE_SUB(CURRENT_DATE(), INTERVAL 3 MONTH) 
+          THEN 1 ELSE 0 
+        END) AS '3 mois'
       FROM vehicules
+      WHERE datevalidite IS NOT NULL 
+        AND datevalidite < CURRENT_DATE()
     `);
 
-    const now = new Date();
-    const delays = {
-      '3 mois': 0,
-      '6 mois': 0,
-      '12 mois': 0,
-      '18 mois': 0,
-      '24+ mois': 0,
-    };
-
-    for (const row of rows as any[]) {
-      if (!row.datevalidite) continue;
-      const validUntil = new Date(row.datevalidite);
-      const diffMonths = (now.getFullYear() - validUntil.getFullYear()) * 12 + (now.getMonth() - validUntil.getMonth());
-
-      if (diffMonths >= 24) delays['24+ mois']++;
-      else if (diffMonths >= 18) delays['18 mois']++;
-      else if (diffMonths >= 12) delays['12 mois']++;
-      else if (diffMonths >= 6) delays['6 mois']++;
-      else if (diffMonths >= 3) delays['3 mois']++;
-    };
-
-
-
-    res.json(delays);
+    const result = (rows as any[])[0];
+    res.json({
+      '3 mois': Number(result['3 mois']) || 0,
+      '6 mois': Number(result['6 mois']) || 0,
+      '12 mois': Number(result['12 mois']) || 0,
+      '18 mois': Number(result['18 mois']) || 0,
+      '24+ mois': Number(result['24+ mois']) || 0,
+    });
   } catch (err) {
+    console.error('Erreur getDelayedStats:', err);
     res.status(500).json({ message: 'Erreur de stats de retard', error: err });
   }
 };
 
 export const getTotalPlates = async (req: Request, res: Response) => {
   try {
+    const cacheKey = getCacheKey('stats:total-plates', {});
+    const cached = cache.get<{ total: number }>(cacheKey);
+    if (cached) return res.json(cached);
+
     const [rows] = await pool.query(`
       SELECT COUNT(DISTINCT immatriculation) AS total FROM vehicules
     `);
-    const result = rows as { total: number }[];
-    res.json(result[0]);
+    const result = (rows as { total: number }[])[0];
+    cache.set(cacheKey, result, 45 * 1000); // 45s, aligné avec CTA Stat refetch
+    res.json(result);
   } catch (err) {
     res.status(500).json({ message: 'Erreur lors du comptage des plaques', error: err });
   }
