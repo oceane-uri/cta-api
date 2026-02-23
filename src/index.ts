@@ -1,4 +1,5 @@
 import express from 'express';
+import cors from 'cors';
 import dotenv from 'dotenv';
 import statsRoutes from './routes/stats';
 import { pool } from './config/db';
@@ -9,35 +10,14 @@ dotenv.config();
 const app = express();
 const port = process.env.PORT || 3000;
 
-// Répondre explicitement aux requêtes OPTIONS (preflight) avec CORS pour éviter 500 sans en-têtes
-app.use('*', (req, res, next) => {
-  const origin = req.headers.origin;
-  const allowOrigin = origin || '*';
-  res.setHeader('Access-Control-Allow-Origin', allowOrigin);
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  res.setHeader('Access-Control-Max-Age', '86400');
-  if (origin) {
-    res.setHeader('Access-Control-Allow-Credentials', 'true');
-  }
-  if (req.method === 'OPTIONS') {
-    res.sendStatus(204);
-    return;
-  }
-  next();
-});
-
+// Autoriser les appels depuis n'importe quelle origine
+app.use(cors());
 app.use(express.json());
 
-// Santé de l'API (sans DB ni JWT) — pour tester si Node répond et si CORS est présent
-const healthResponse = (_req: express.Request, res: express.Response) => {
+// Santé de l'API (sans DB ni JWT)
+app.get('/api/health', (_req, res) => {
   res.json({ ok: true, service: 'cta-api' });
-};
-app.get('/api/health', healthResponse);
-app.get('/api/health/', healthResponse);
-// Au cas où le proxy transmet le chemin sans le préfixe /api
-app.get('/health', healthResponse);
-app.get('/health/', healthResponse);
+});
 
 app.use('/api/auth', authRoutes);
 app.use('/api/stats', statsRoutes);
@@ -62,27 +42,16 @@ app.use((_req, res) => {
   res.status(404).json({ message: 'Route non trouvée' });
 });
 
-// Gestionnaire d'erreurs global : toujours ajouter CORS pour que le navigateur ne bloque pas la réponse 5xx
+// Gestionnaire d'erreurs global (CORS sur les réponses d'erreur pour que le front puisse les lire)
 app.use((err: Error, req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error('Erreur non gérée:', err);
   if (!res.headersSent) {
-    const origin = req.headers.origin;
-    if (origin) {
-      res.setHeader('Access-Control-Allow-Origin', origin);
-      res.setHeader('Access-Control-Allow-Credentials', 'true');
-    } else {
-      res.setHeader('Access-Control-Allow-Origin', '*');
-    }
+    res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
     res.status(500).json({ message: 'Erreur serveur', error: process.env.NODE_ENV === 'development' ? err.message : undefined });
   }
 });
 
-// Sur Vercel, l'app est utilisée comme handler serverless (pas de listen)
-if (!process.env.VERCEL) {
-  app.listen(port, () => {
-    console.log(`🚀 Serveur lancé sur http://localhost:${port}`);
-    console.log(`   → Dans Plesk, l'URL de l'application doit être : http://127.0.0.1:${port}`);
-  });
-}
-
-export { app };
+app.listen(port, () => {
+  console.log(`🚀 Serveur lancé sur http://localhost:${port}`);
+  console.log(`   → Dans Plesk, l'URL de l'application doit être : http://127.0.0.1:${port}`);
+});

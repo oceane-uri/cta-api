@@ -3,8 +3,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.app = void 0;
 const express_1 = __importDefault(require("express"));
+const cors_1 = __importDefault(require("cors"));
 const dotenv_1 = __importDefault(require("dotenv"));
 const stats_1 = __importDefault(require("./routes/stats"));
 const db_1 = require("./config/db");
@@ -12,35 +12,14 @@ const inspections_1 = __importDefault(require("./routes/inspections"));
 const auth_1 = __importDefault(require("./routes/auth"));
 dotenv_1.default.config();
 const app = (0, express_1.default)();
-exports.app = app;
 const port = process.env.PORT || 3000;
-// Répondre explicitement aux requêtes OPTIONS (preflight) avec CORS pour éviter 500 sans en-têtes
-app.use('*', (req, res, next) => {
-    const origin = req.headers.origin;
-    const allowOrigin = origin || '*';
-    res.setHeader('Access-Control-Allow-Origin', allowOrigin);
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-    res.setHeader('Access-Control-Max-Age', '86400');
-    if (origin) {
-        res.setHeader('Access-Control-Allow-Credentials', 'true');
-    }
-    if (req.method === 'OPTIONS') {
-        res.sendStatus(204);
-        return;
-    }
-    next();
-});
+// Autoriser les appels depuis n'importe quelle origine
+app.use((0, cors_1.default)());
 app.use(express_1.default.json());
-// Santé de l'API (sans DB ni JWT) — pour tester si Node répond et si CORS est présent
-const healthResponse = (_req, res) => {
+// Santé de l'API (sans DB ni JWT)
+app.get('/api/health', (_req, res) => {
     res.json({ ok: true, service: 'cta-api' });
-};
-app.get('/api/health', healthResponse);
-app.get('/api/health/', healthResponse);
-// Au cas où le proxy transmet le chemin sans le préfixe /api
-app.get('/health', healthResponse);
-app.get('/health/', healthResponse);
+});
 app.use('/api/auth', auth_1.default);
 app.use('/api/stats', stats_1.default);
 app.use('/api/inspections', inspections_1.default);
@@ -61,25 +40,15 @@ app.get('/test-db', async (_req, res) => {
 app.use((_req, res) => {
     res.status(404).json({ message: 'Route non trouvée' });
 });
-// Gestionnaire d'erreurs global : toujours ajouter CORS pour que le navigateur ne bloque pas la réponse 5xx
+// Gestionnaire d'erreurs global (CORS sur les réponses d'erreur pour que le front puisse les lire)
 app.use((err, req, res, _next) => {
     console.error('Erreur non gérée:', err);
     if (!res.headersSent) {
-        const origin = req.headers.origin;
-        if (origin) {
-            res.setHeader('Access-Control-Allow-Origin', origin);
-            res.setHeader('Access-Control-Allow-Credentials', 'true');
-        }
-        else {
-            res.setHeader('Access-Control-Allow-Origin', '*');
-        }
+        res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
         res.status(500).json({ message: 'Erreur serveur', error: process.env.NODE_ENV === 'development' ? err.message : undefined });
     }
 });
-// Sur Vercel, l'app est utilisée comme handler serverless (pas de listen)
-if (!process.env.VERCEL) {
-    app.listen(port, () => {
-        console.log(`🚀 Serveur lancé sur http://localhost:${port}`);
-        console.log(`   → Dans Plesk, l'URL de l'application doit être : http://127.0.0.1:${port}`);
-    });
-}
+app.listen(port, () => {
+    console.log(`🚀 Serveur lancé sur http://localhost:${port}`);
+    console.log(`   → Dans Plesk, l'URL de l'application doit être : http://127.0.0.1:${port}`);
+});

@@ -1,7 +1,0 @@
-node_modules
-deploy-output
-.git
-*.log
-.env
-.env.*
-!.env.example
